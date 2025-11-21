@@ -1,0 +1,74 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main  # 当推送到 main 分支时触发
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Next.js app
+        run: npm run build
+
+      # 关键步骤：整理 Standalone 文件
+      # Standalone 模式默认不会包含 public 文件夹和 .next/static 文件夹
+      # 需要手动复制进去，否则图片和样式会丢失
+      - name: Prepare standalone directory
+        run: |
+          cp -r public .next/standalone/
+          cp -r .next/static .next/standalone/.next/
+
+      # 压缩文件以便传输
+      - name: Archive production artifact
+        run: tar -czf package.tar.gz -C .next/standalone .
+
+      # 使用 SCP 将压缩包传到 VPS
+      - name: Copy files to VPS
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: "package.tar.gz"
+          target: "/var/www/pccfree"
+
+      # 远程执行命令：解压并重启
+      - name: Execute remote commands
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /var/www/pccfree
+            # 解压覆盖
+            tar -xzf package.tar.gz
+            # 删除压缩包
+            rm package.tar.gz
+            
+            # PM2 管理 (如果进程不存在则启动，存在则重载)
+            # server.js 是 standalone 模式生成的入口文件
+            pm2 describe nextjs-app > /dev/null
+            if [ $? -eq 0 ]; then
+              pm2 reload nextjs-app
+            else
+              pm2 start ecosystem.config.js --name nextjs-app
+            fi
+            
+            # 保存 PM2 状态，防止重启失效
+            pm2 save
