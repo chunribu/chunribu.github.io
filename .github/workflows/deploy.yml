@@ -35,7 +35,7 @@ jobs:
 
       # 压缩文件以便传输
       - name: Archive production artifact
-        run: tar -czf package.tar.gz -C .next/standalone .
+        run: tar --exclude='./node_modules' -czf package.tar.gz -C .next/standalone .
 
       # 使用 SCP 将压缩包传到 VPS
       - name: Copy files to VPS
