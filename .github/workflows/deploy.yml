@@ -39,7 +39,7 @@ jobs:
 
       # 使用 SCP 将压缩包传到 VPS
       - name: Copy files to VPS
-        uses: appleboy/scp-action@master
+        uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
@@ -49,7 +49,7 @@ jobs:
 
       # 远程执行命令：解压并重启
       - name: Execute remote commands
-        uses: appleboy/ssh-action@master
+        uses: appleboy/ssh-action@v0.1.7
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
