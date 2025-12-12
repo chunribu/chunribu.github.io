@@ -35,21 +35,23 @@ jobs:
 
       # 压缩文件以便传输
       - name: Archive production artifact
-        run: tar --exclude='./node_modules' -czf package.tar.gz -C .next/standalone .
-
-      # 使用 SCP 将压缩包传到 VPS
-      - name: Copy files to VPS
-        uses: appleboy/scp-action@v0.1.7
+        run: tar -czf package.tar.gz -C .next/standalone .
+      # --- 修改开始 ---
+      # 1. 配置 SSH Key
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
         with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          source: "package.tar.gz"
-          target: "/var/www/pccfree"
-
-      # 远程执行命令：解压并重启
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
+      # 2. 添加主机指纹 (防止交互式提示)
+      - name: Add host key
+        run: ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+      # 3. 使用原生 scp 传输 (更稳定，不耗费额外内存)
+      - name: Copy files to VPS via SCP
+        run: scp package.tar.gz ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/var/www/pccfree/package.tar.gz
+      # --- 修改结束 ---
+      # 远程执行命令 (这部分可以保持不变，或者也改用原生 ssh 命令)
       - name: Execute remote commands
-        uses: appleboy/ssh-action@v0.1.7
+        uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
