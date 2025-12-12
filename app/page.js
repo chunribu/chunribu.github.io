@@ -13,7 +13,7 @@ export default function Home() {
         <div className="relative h-40 w-40 overflow-hidden rounded-full sm:h-52 sm:w-52">
           <Image
             src="/pccfs.png"
-            alt="PCC Free Space Logo"
+            alt="Logo"
             fill
             className="object-cover"
             priority
