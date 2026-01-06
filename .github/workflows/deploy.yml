@@ -1,76 +1,74 @@
-name: Deploy to VPS
+name: Deploy to GitHub Pages
 
 on:
   push:
-    branches:
-      - main  # 当推送到 main 分支时触发
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
+      
+      - name: Detect package manager
+        id: detect-package-manager
+        run: |
+          if [ -f "${{ github.workspace }}/yarn.lock" ]; then
+            echo "manager=yarn" >> $GITHUB_OUTPUT
+            echo "command=install" >> $GITHUB_OUTPUT
+            echo "runner=yarn" >> $GITHUB_OUTPUT
+            exit 0
+          elif [ -f "${{ github.workspace }}/package.json" ]; then
+            echo "manager=npm" >> $GITHUB_OUTPUT
+            echo "command=ci" >> $GITHUB_OUTPUT
+            echo "runner=npx --no-install" >> $GITHUB_OUTPUT
+            exit 0
+          else
+            echo "Unable to determine package manager"
+            exit 1
+          fi
 
-      - name: Setup Node.js
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: ${{ steps.detect-package-manager.outputs.manager }}
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+        with:
+          # 自动注入 basePath (如果 next.config.js 未硬编码，此步骤可协助处理)
+          static_site_generator: next
 
       - name: Install dependencies
-        run: npm ci
+        run: ${{ steps.detect-package-manager.outputs.manager }} ${{ steps.detect-package-manager.outputs.command }}
 
-      - name: Build Next.js app
-        run: npm run build
+      - name: Build with Next.js
+        run: ${{ steps.detect-package-manager.outputs.runner }} next build
 
-      # 关键步骤：整理 Standalone 文件
-      # Standalone 模式默认不会包含 public 文件夹和 .next/static 文件夹
-      # 需要手动复制进去，否则图片和样式会丢失
-      - name: Prepare standalone directory
-        run: |
-          cp -r public .next/standalone/
-          cp -r .next/static .next/standalone/.next/
-
-      # 压缩文件以便传输
-      - name: Archive production artifact
-        run: tar -czf package.tar.gz -C .next/standalone .
-      # --- 修改开始 ---
-      # 1. 配置 SSH Key
-      - name: Setup SSH
-        uses: webfactory/ssh-agent@v0.9.0
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
-      # 2. 添加主机指纹 (防止交互式提示)
-      - name: Add host key
-        run: ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
-      # 3. 使用原生 scp 传输 (更稳定，不耗费额外内存)
-      - name: Copy files to VPS via SCP
-        run: scp package.tar.gz ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/var/www/pccfree/package.tar.gz
-      # --- 修改结束 ---
-      # 远程执行命令 (这部分可以保持不变，或者也改用原生 ssh 命令)
-      - name: Execute remote commands
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          script: |
-            cd /var/www/pccfree
-            # 解压覆盖
-            tar -xzf package.tar.gz
-            # 删除压缩包
-            rm package.tar.gz
-            
-            # PM2 管理 (如果进程不存在则启动，存在则重载)
-            # server.js 是 standalone 模式生成的入口文件
-            pm2 describe nextjs-app > /dev/null
-            if [ $? -eq 0 ]; then
-              pm2 reload nextjs-app
-            else
-              pm2 start server.js --name nextjs-app
-            fi
-            
-            # 保存 PM2 状态，防止重启失效
-            pm2 save
+          path: ./out
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
